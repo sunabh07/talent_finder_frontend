@@ -1,6 +1,7 @@
 import { configureStore, isAnyOf } from "@reduxjs/toolkit";
 import type { Middleware } from "@reduxjs/toolkit";
 import { api } from "@/app/api";
+import { apiLogger } from "@/app/apiLogger";
 import tenantReducer, { selectTenant } from "@/app/tenantSlice";
 
 /**
@@ -36,7 +37,7 @@ export const store = configureStore({
     tenant: tenantReducer,
   },
   middleware: (getDefault) =>
-    getDefault().concat(api.middleware, invalidateTenantDataOnSwitch),
+    getDefault().concat(api.middleware, apiLogger, invalidateTenantDataOnSwitch),
 });
 
 export type RootState = ReturnType<typeof store.getState>;

@@ -20,7 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TenantSwitcher } from "@/components/TenantSwitcher";
 
 const NAV_ITEMS = [
@@ -70,6 +71,7 @@ function Logo() {
 
 export function Layout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const location = useLocation();
 
   return (
     <div className="min-h-screen">
@@ -137,7 +139,11 @@ export function Layout() {
 
       <main className="px-4 pb-12 pt-20 lg:pl-60 lg:pr-6">
         <div className="mx-auto max-w-6xl">
-          <Outlet />
+          {/* Scoped to the page, so a render crash leaves the sidebar and
+              header usable; keyed on the route so navigating away recovers. */}
+          <ErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
     </div>
