@@ -21,6 +21,8 @@ import type {
   CandidateInput,
   CandidateListItem,
   CandidateStats,
+  CvParseResult,
+  JobCvEvidence,
   JobOrder,
   JobOrderInput,
   JobOrderListItem,
@@ -114,10 +116,18 @@ export const api = createApi({
       query: (id) => ({ url: `/candidates/${id}`, method: "DELETE" }),
       invalidatesTags: ["Candidate"],
     }),
-    uploadCv: build.mutation<unknown, { id: number; file: File }>({
-      query: ({ id, file }) => {
+    parseCv: build.mutation<CvParseResult, File>({
+      query: (file) => {
         const form = new FormData();
         form.append("file", file);
+        return { url: "/candidates/cv/parse", method: "POST", body: form };
+      },
+    }),
+    uploadCv: build.mutation<unknown, { id: number; file: File; evidence: string[] }>({
+      query: ({ id, file, evidence }) => {
+        const form = new FormData();
+        form.append("file", file);
+        if (evidence.length) form.append("evidence", JSON.stringify(evidence));
         // No Content-Type header: the browser must set the multipart boundary.
         return { url: `/candidates/${id}/cv`, method: "POST", body: form };
       },
@@ -162,7 +172,14 @@ export const api = createApi({
       query: ({ id, params }) => ({ url: `/job-orders/${id}/matches`, params }),
       // Tagged JobOrder so that shortlisting - which flips is_shortlisted on a
       // match row - refetches this list without any manual wiring.
-      providesTags: ["JobOrder"],
+      providesTags: ["JobOrder", "Candidate"],
+    }),
+    showJobCvEvidence: build.mutation<JobCvEvidence[], { id: number; page: number }>({
+      query: ({ id, page }) => ({
+        url: `/job-orders/${id}/cv-evidence`,
+        method: "POST",
+        params: { page },
+      }),
     }),
 
     // --- Shortlisting and submissions ------------------------------------
@@ -201,6 +218,7 @@ export const {
   useUpdateCandidateMutation,
   useDeleteCandidateMutation,
   useUploadCvMutation,
+  useParseCvMutation,
   useDeleteCvMutation,
   useListJobOrdersQuery,
   useJobOrderStatsQuery,
@@ -209,6 +227,7 @@ export const {
   useUpdateJobOrderMutation,
   useDeleteJobOrderMutation,
   useJobOrderMatchesQuery,
+  useShowJobCvEvidenceMutation,
   useShortlistMutation,
   useListSubmissionsQuery,
   useSubmissionStatsQuery,

@@ -1,19 +1,17 @@
 /**
  * Story 2.2 Create Candidate, and the edit form from Story 2.3.
  *
- * The CV control sits at the top of the form as the brief specifies. In this
- * build it attaches the file after save - the candidate must exist before it
- * can own a CV. Story 7 adds parse-and-prefill in front of it, which is why
- * the control is positioned first even though it is the last thing sent.
+ * A CV can prefill a new candidate before it is attached to the saved profile.
  */
 
 import { ArrowLeft, Paperclip, Upload, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   errorMessage,
   useCreateCandidateMutation,
   useGetCandidateQuery,
+  useParseCvMutation,
   useUpdateCandidateMutation,
   useUploadCvMutation,
 } from "@/app/api";
@@ -49,21 +47,43 @@ const MAX_CV_MB = 10;
 export function CandidateFormPage() {
   const { id } = useParams();
   const candidateId = id ? Number(id) : null;
+  const tenantId = useSelectedTenantId();
+  return (
+    <CandidateForm key={`${tenantId}:${candidateId}`} tenantId={tenantId} candidateId={candidateId} />
+  );
+}
+
+function CandidateForm({
+  tenantId,
+  candidateId,
+}: {
+  tenantId: number | null;
+  candidateId: number | null;
+}) {
   const isEdit = candidateId !== null;
 
   const navigate = useNavigate();
-  const tenantId = useSelectedTenantId();
 
   const existing = useGetCandidateQuery(candidateId as number, { skip: !isEdit });
   const [createCandidate, createState] = useCreateCandidateMutation();
   const [updateCandidate, updateState] = useUpdateCandidateMutation();
   const [uploadCv] = useUploadCvMutation();
+  const [parseCv] = useParseCvMutation();
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [cvFile, setCvFile] = useState<File | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormState, string>>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [cvWarning, setCvWarning] = useState<string | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [cvParsed, setCvParsed] = useState(false);
+  const [cvEvidence, setCvEvidence] = useState<string[]>([]);
+  const parseRequest = useRef<ReturnType<typeof parseCv> | null>(null);
+
+  useEffect(() => () => {
+    parseRequest.current?.abort();
+    parseRequest.current = null;
+  }, []);
 
   // Populate once the existing record arrives.
   useEffect(() => {
@@ -106,7 +126,45 @@ export function CandidateFormPage() {
     return Object.keys(errors).length === 0;
   }
 
+  async function prefill(file: File) {
+    const request = parseCv(file);
+    parseRequest.current = request;
+    setParsing(true);
+    try {
+      const result = await request.unwrap();
+      if (parseRequest.current !== request) return;
+      setForm((previous) => ({
+        full_name: previous.full_name || result.full_name || "",
+        location: previous.location || result.location || "",
+        total_experience_years: previous.total_experience_years ||
+          (result.total_experience_years === null ? "" : String(result.total_experience_years)),
+        skills: previous.skills.length ? previous.skills : result.skills,
+        email: previous.email || result.email || "",
+        phone: previous.phone || result.phone || "",
+        current_role: previous.current_role || result.current_role || "",
+        professional_summary: previous.professional_summary || result.professional_summary || "",
+      }));
+      setFieldErrors({});
+      setCvEvidence(result.evidence);
+      setCvParsed(true);
+    } catch (caught) {
+      if (parseRequest.current === request) {
+        setCvWarning(errorMessage(caught, "CV autofill failed. Enter the details manually."));
+      }
+    } finally {
+      if (parseRequest.current === request) {
+        parseRequest.current = null;
+        setParsing(false);
+      }
+    }
+  }
+
   function pickFile(file: File | null) {
+    parseRequest.current?.abort();
+    parseRequest.current = null;
+    setParsing(false);
+    setCvParsed(false);
+    setCvEvidence([]);
     setCvWarning(null);
     if (!file) {
       setCvFile(null);
@@ -122,10 +180,12 @@ export function CandidateFormPage() {
       return;
     }
     setCvFile(file);
+    void prefill(file);
   }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    if (parsing || saving) return;
     setFormError(null);
     if (!validate()) return;
 
@@ -150,7 +210,7 @@ export function CandidateFormPage() {
       // the details page rather than rolling anything back.
       if (cvFile) {
         try {
-          await uploadCv({ id: saved.id, file: cvFile }).unwrap();
+          await uploadCv({ id: saved.id, file: cvFile, evidence: cvEvidence }).unwrap();
         } catch (caught) {
           navigate(`/candidates/${saved.id}`, {
             state: { cvError: errorMessage(caught, "The CV could not be attached.") },
@@ -196,6 +256,17 @@ export function CandidateFormPage() {
           {/* CV control sits at the top, per the brief. */}
           <Card className="p-5">
             <Label>Upload CV <span className="font-normal text-slate-500">(optional)</span></Label>
+            <div className="mb-3 space-y-1 text-sm text-slate-600">
+              <p className="text-xs">
+                Choosing a file sends it to Gemini to fill blank fields. Use fictional CVs with unpaid Gemini access.
+              </p>
+                <p className="text-xs">
+                  Download a fictional demo CV{" "}
+                  <a href={`${import.meta.env.BASE_URL}demo-cv.pdf`} download className="text-brand-700 underline">PDF</a>
+                  {" or "}
+                  <a href={`${import.meta.env.BASE_URL}demo-cv.docx`} download className="text-brand-700 underline">DOCX</a>
+                </p>
+            </div>
             {cvFile ? (
               <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2.5 ring-1 ring-inset ring-slate-200">
                 <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
@@ -223,16 +294,19 @@ export function CandidateFormPage() {
                 </span>
                 <input
                   type="file"
-                  accept=".pdf,.docx"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   className="sr-only"
                   onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
                 />
               </label>
             )}
             <FieldError>{cvWarning}</FieldError>
-            <p className="mt-2 text-xs text-slate-500">
-              Automatic form filling from a CV is not enabled in this build — enter the details
-              below. The file is stored and downloadable from the candidate's page.
+            <p className="mt-2 text-xs text-slate-500" role="status">
+              {parsing
+                ? "Reading the CV…"
+                : cvParsed
+                  ? "Review the suggested details and fill any blanks before saving."
+                  : "The file will be available on the candidate’s page after saving."}
             </p>
           </Card>
 
@@ -338,7 +412,7 @@ export function CandidateFormPage() {
             {formError && (
               <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{formError}</p>
             )}
-            <Button type="submit" disabled={saving} className="w-full">
+            <Button type="submit" disabled={saving || parsing} className="w-full">
               {saving ? "Saving…" : isEdit ? "Save changes" : "Create Candidate"}
             </Button>
             <Button

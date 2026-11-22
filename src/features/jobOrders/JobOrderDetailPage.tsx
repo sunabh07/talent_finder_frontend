@@ -26,17 +26,23 @@ import {
   errorMessage,
   useGetJobOrderQuery,
   useJobOrderMatchesQuery,
+  useShowJobCvEvidenceMutation,
   useShortlistMutation,
 } from "@/app/api";
+import { useSelectedTenantId } from "@/app/hooks";
 import { useListControls } from "@/app/useListControls";
 import { EmptyState, ErrorState, TableFooter } from "@/components/DataTable";
 import { PageHeader } from "@/components/Layout";
 import { Badge, Button, Card } from "@/components/ui";
-import type { MatchedCandidate } from "@/types";
+import type { JobCvEvidence, MatchedCandidate } from "@/types";
 
 export function JobOrderDetailPage() {
   const { id } = useParams();
-  const jobOrderId = Number(id);
+  const tenantId = useSelectedTenantId();
+  return <JobOrderDetails key={`${tenantId}:${id}`} jobOrderId={Number(id)} />;
+}
+
+function JobOrderDetails({ jobOrderId }: { jobOrderId: number }) {
   const navigate = useNavigate();
 
   const job = useGetJobOrderQuery(jobOrderId);
@@ -48,6 +54,7 @@ export function JobOrderDetailPage() {
   });
 
   const [shortlist] = useShortlistMutation();
+  const [showEvidence, evidence] = useShowJobCvEvidenceMutation();
   const [busyCandidateId, setBusyCandidateId] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -87,7 +94,8 @@ export function JobOrderDetailPage() {
   }
 
   const data = job.data;
-  const matchPage = matches.data;
+  const matchPage = matches.currentData;
+  const pageEvidence = evidence.originalArgs?.page === matchPage?.page ? evidence : undefined;
 
   return (
     <>
@@ -169,6 +177,27 @@ export function JobOrderDetailPage() {
             Same tenant only · ranked by matched skills · candidates with no match are excluded
           </p>
         </div>
+        {matchPage && matchPage.items.length > 0 && !matches.isFetching && (
+          <div className="mb-3 space-y-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              disabled={Boolean(evidence.isLoading)}
+              onClick={() => void showEvidence({ id: jobOrderId, page: matchPage.page })}
+            >
+              {pageEvidence?.isLoading ? "Checking CV evidence…" : "Show AI suggestions"}
+            </Button>
+            {pageEvidence?.isError && (
+              <p role="alert" className="text-sm text-rose-700">{errorMessage(pageEvidence.error)}</p>
+            )}
+            {pageEvidence?.data?.length === 0 && (
+              <p role="status" className="text-sm text-slate-600">
+                No suggestions for these matches. Suggestions require relevant work described in a CV.
+              </p>
+            )}
+          </div>
+        )}
 
         <Card className="overflow-hidden">
           {matches.isError ? (
@@ -198,6 +227,9 @@ export function JobOrderDetailPage() {
                     rank={(matchPage.page - 1) * matchPage.page_size + index + 1}
                     requiredCount={matchPage.summary.required_skill_count}
                     busy={busyCandidateId === candidate.candidate_id}
+                    suggestion={pageEvidence?.data?.find(
+                      (note) => note.candidate_id === candidate.candidate_id,
+                    )}
                     onShortlist={() => handleShortlist(candidate)}
                   />
                 ))}
@@ -271,12 +303,14 @@ function MatchRow({
   rank,
   requiredCount,
   busy,
+  suggestion,
   onShortlist,
 }: {
   candidate: MatchedCandidate;
   rank: number;
   requiredCount: number;
   busy: boolean;
+  suggestion?: JobCvEvidence;
   onShortlist: () => void;
 }) {
   return (
@@ -322,6 +356,12 @@ function MatchRow({
             </span>
           ))}
         </div>
+        {suggestion && (
+          <div className="mt-2 rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <p><strong>AI suggestion</strong> · Relevant to <q>{suggestion.job_requirement}</q></p>
+            <p className="mt-1"><q>{suggestion.excerpt}</q> <span className="text-slate-500">— CV</span></p>
+          </div>
+        )}
       </div>
 
       <div className="shrink-0">

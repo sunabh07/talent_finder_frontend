@@ -212,3 +212,21 @@ export interface ShortlistResult {
   created_at: string;
   already_shortlisted: boolean;
 }
+
+export interface CvParseResult {
+  full_name: string | null;
+  location: string | null;
+  total_experience_years: number | null;
+  skills: string[];
+  email: string | null;
+  phone: string | null;
+  current_role: string | null;
+  professional_summary: string | null;
+  evidence: string[];
+}
+
+export interface JobCvEvidence {
+  candidate_id: number;
+  excerpt: string;
+  job_requirement: string;
+}
